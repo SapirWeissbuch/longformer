@@ -128,56 +128,55 @@ class ModifiedTriviaQADataset(TriviaQADataset):
             input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
             input_mask = [1] * len(input_ids)
 
-            doc_offset = len(query_tokens) + 2 - slice_start
-            start_positions = []
-            end_positions = []
-            answer_token_ids = []
-            for answer_span in answer_spans:
-                start_position = answer_span['start']
-                end_position = answer_span['end']
-                tok_start_position_in_doc = orig_to_tok_index[start_position]
-                not_end_of_doc = int(end_position + 1 < len(orig_to_tok_index))
-                tok_end_position_in_doc = orig_to_tok_index[end_position + not_end_of_doc] - not_end_of_doc
-                if tok_start_position_in_doc < slice_start or tok_end_position_in_doc > slice_end:
-                    # this answer is outside the current slice
-                    continue
-                start_positions.append(tok_start_position_in_doc + doc_offset)
-                end_positions.append(tok_end_position_in_doc + doc_offset)
-                answer_token_ids.append(answer_span['token_ids'])
-            assert len(start_positions) == len(end_positions)
-            if self.ignore_seq_with_no_answers and len(start_positions) == 0:
-                continue
+            if question_idx == 0: # calculating start/end/answer only for original question
+                    doc_offset = len(query_tokens) + 2 - slice_start
+                    start_positions = []
+                    end_positions = []
+                    answer_token_ids = []
+                    for answer_span in answer_spans:
+                        start_position = answer_span['start']
+                        end_position = answer_span['end']
+                        tok_start_position_in_doc = orig_to_tok_index[start_position]
+                        not_end_of_doc = int(end_position + 1 < len(orig_to_tok_index))
+                        tok_end_position_in_doc = orig_to_tok_index[end_position + not_end_of_doc] - not_end_of_doc
+                        if tok_start_position_in_doc < slice_start or tok_end_position_in_doc > slice_end:
+                            # this answer is outside the current slice
+                            continue
+                        start_positions.append(tok_start_position_in_doc + doc_offset)
+                        end_positions.append(tok_end_position_in_doc + doc_offset)
+                        answer_token_ids.append(answer_span['token_ids'])
+                    assert len(start_positions) == len(end_positions)
+                    if self.ignore_seq_with_no_answers and len(start_positions) == 0:
+                        continue
 
-            # answers from start_positions and end_positions if > self.max_num_answers
-            start_positions = start_positions[:self.max_num_answers]
-            end_positions = end_positions[:self.max_num_answers]
-            answer_token_ids = answer_token_ids[:self.max_num_answers]
+                    # answers from start_positions and end_positions if > self.max_num_answers
+                    start_positions = start_positions[:self.max_num_answers]
+                    end_positions = end_positions[:self.max_num_answers]
+                    answer_token_ids = answer_token_ids[:self.max_num_answers]
 
-            # -1 padding up to self.max_num_answers
-            padding_len = self.max_num_answers - len(start_positions)
-            start_positions.extend([-1] * padding_len)
-            end_positions.extend([-1] * padding_len)
-            answer_token_ids.extend([[]] * padding_len)
+                    # -1 padding up to self.max_num_answers
+                    padding_len = self.max_num_answers - len(start_positions)
+                    start_positions.extend([-1] * padding_len)
+                    end_positions.extend([-1] * padding_len)
+                    answer_token_ids.extend([[]] * padding_len)
 
-            # replace duplicate start/end positions with `-1` because duplicates can result into -ve loss values
-            found_start_positions = set()
-            found_end_positions = set()
-            found_answer_token_ids = set()
-            for i, (start_position, end_position, answer_tokens) in enumerate(
-                    zip(start_positions, end_positions, answer_token_ids)
-                    ):
-                if start_position in found_start_positions:
-                    start_positions[i] = -1
-                if end_position in found_end_positions:
-                    end_positions[i] = -1
-                answer_tokens_as_str = ','.join([str(x) for x in answer_tokens])
-                if answer_tokens_as_str in found_answer_token_ids:
-                    answer_token_ids[i] = []
-
-
-                    found_start_positions.add(start_position)
-                    found_end_positions.add(end_position)
-                    found_answer_token_ids.add(answer_tokens_as_str)
+                    # replace duplicate start/end positions with `-1` because duplicates can result into -ve loss values
+                    found_start_positions = set()
+                    found_end_positions = set()
+                    found_answer_token_ids = set()
+                    for i, (start_position, end_position, answer_tokens) in enumerate(
+                            zip(start_positions, end_positions, answer_token_ids)
+                            ):
+                        if start_position in found_start_positions:
+                            start_positions[i] = -1
+                        if end_position in found_end_positions:
+                            end_positions[i] = -1
+                        answer_tokens_as_str = ','.join([str(x) for x in answer_tokens])
+                        if answer_tokens_as_str in found_answer_token_ids:
+                            answer_token_ids[i] = []
+                        found_start_positions.add(start_position)
+                        found_end_positions.add(end_position)
+                        found_answer_token_ids.add(answer_tokens_as_str)
 
             input_ids_list.append(input_ids)
             input_mask_list.append(input_mask)
@@ -219,9 +218,20 @@ class InteractiveTriviaQA(TriviaQA):
 
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
         batch_size = input_ids.shape[0]
-        import pdb; pdb.set_trace()
-        sequence_output = self.model(input_ids.view(batch_size * (self.current_interaction_num+1), -1),
-                                     attention_mask=attention_mask.view(batch_size * (self.current_interaction_num+1), -1))[0]
+        input_ids = input_ids.view(batch_size * (self.current_interaction_num+1), -1)
+        attention_mask = attention_mask.view(batch_size * (self.current_interaction_num+1), -1)
+        question_end_index = self._get_question_end_index(input_ids)
+        # Each batch is one document, and each row of the batch is a chunck of the document.
+        # Make sure all rows have the same question length.
+        # assert (question_end_index[0].float() == question_end_index.float().mean()).item()
+        # local attention everywhere, global attention on question
+        tri = torch.tril(torch.ones([input_ids.shape[1],input_ids.shape[1]], dtype=torch.long, device=input_ids.device), diagonal=-1)
+        attention_mask = tri[question_end_index] + 1
+
+        # sliding_chunks implemenation of selfattention requires that seqlen is multiple of window size
+        input_ids, attention_mask = pad_to_window_size(
+            input_ids, attention_mask, self.args.attention_window, self.tokenizer.pad_token_id)
+        sequence_output = self.model(input_ids, attention_mask=attention_mask)[0]
         sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, self.args.max_seq_len, -1)
         p = (0, 0, 0, 0, 0, self.max_num_of_interactions-self.current_interaction_num)
         sequence_output = torch.nn.functional.pad(sequence_output, p).permute(0,2,3,1)
@@ -326,21 +336,6 @@ class InteractiveTriviaQA(TriviaQA):
         assert len(answers) == len(qids)
         return {'qids': qids, 'answers': answers}
 
-    def test_step(self, batch, batch_nb):
-        input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids, qids, aliases = batch
-        output = self.forward(input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids)
-        if self.args.seq2seq:
-            raise NotImplemented
-
-        loss, start_logits, end_logits = output[:3]
-        answers = self.decode(input_ids, start_logits, end_logits)
-
-        # each batch is one document
-        answers = sorted(answers, key=lambda x: x['score'], reverse=True)[0:1]
-        qids = [qids]
-        assert len(answers) == len(qids)
-        return {'qids': qids, 'answers': answers}
-
 
     @pl.data_loader
     def train_dataloader(self):
@@ -369,7 +364,7 @@ class InteractiveTriviaQA(TriviaQA):
                                   doc_stride=self.args.doc_stride,
                                   max_num_answers=self.args.max_num_answers,
                                   max_question_len=self.args.max_question_len,
-                                          ignore_seq_with_no_answers=False, num_of_interactions=self.current_interaction_num)  # evaluation data should keep all examples
+                                          ignore_seq_with_no_answers=False, num_of_interactions=self.current_interaction_num)  # evaluation data should keep all example
 
         dl = DataLoader(dataset, batch_size=1, shuffle=False,
                         num_workers=self.args.num_workers, sampler=None,
@@ -403,7 +398,7 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    current_interaction_num = 2
+    current_interaction_num = 1
     max_num_of_interactions = 2
     model = InteractiveTriviaQA(args, current_interaction_num=current_interaction_num,
                                 max_num_of_interactions=max_num_of_interactions)
@@ -454,15 +449,4 @@ if __name__ == "__main__":
     main_arg_parser = argparse.ArgumentParser(description="triviaQa")
     parser = TriviaQA.add_model_specific_args(main_arg_parser, os.getcwd())
     args = parser.parse_args()
-    tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-    tokenizer.model_max_length = args.max_seq_len
-    dataset = ModifiedTriviaQADataset(file_path=args.dev_dataset, tokenizer=tokenizer,
-                          max_seq_len=args.max_seq_len, max_doc_len=args.max_doc_len,
-                          doc_stride=args.doc_stride,
-                          max_num_answers=args.max_num_answers,
-                          max_question_len=args.max_question_len,
-                                      ignore_seq_with_no_answers=False,
-                                      num_of_interactions=1)
-
-    x = dataset[0]
     main(args)

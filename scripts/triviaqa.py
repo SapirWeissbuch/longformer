@@ -333,7 +333,6 @@ class TriviaQA(pl.LightningModule):
         return model
 
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
-        import pdb; pdb.set_trace()
         if 'longformer' in self.args.model_path:
             question_end_index = self._get_question_end_index(input_ids)
             # Each batch is one document, and each row of the batch is a chunck of the document.
