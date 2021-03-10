@@ -1,4 +1,5 @@
 import sys
+import copy
 sys.path.append(".")
 import os
 from collections import defaultdict
@@ -337,6 +338,21 @@ class InteractiveTriviaQA(TriviaQA):
         assert len(answers) == len(qids)
         return {'qids': qids, 'answers': answers}
 
+    def training_step(self, batch, batch_nb):
+        input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids, qids, aliases = batch
+        output = self.forward(input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids)
+        loss = output[0]
+        lr = loss.new_zeros(1) + self.trainer.optimizers[0].param_groups[0]['lr']
+        if self.current_epoch == 1:
+            sample_data_loader = copy.deepcopy(self.train_dataloader())
+            sample_data = next(iter(sample_data_loader))
+            self.logger.experiment.add_graph(InteractiveTriviaQA(self.args, self.current_interaction_num, self.max_num_of_interactions), sample_data)
+
+        tensorboard_logs = {'train_loss': loss, 'lr': lr,
+                            'input_size': input_ids.numel(),
+                            'mem': torch.cuda.memory_allocated(input_ids.device) / 1024 ** 3}
+        return {'loss': loss, 'log': tensorboard_logs}
+
 
     @pl.data_loader
     def train_dataloader(self):
@@ -407,8 +423,9 @@ def main(args):
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
-        version=0  # always use version=0
+        # version=0 # always use version=0
     )
+
 
     checkpoint_callback = ModelCheckpoint(
         filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints"),
