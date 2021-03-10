@@ -1,4 +1,5 @@
 import sys
+sys.path.append(".")
 import os
 from collections import defaultdict
 import argparse
@@ -16,12 +17,13 @@ from scripts.triviaqa_utils import evaluation_utils
 import pytorch_lightning as pl
 from pytorch_lightning.logging import TestTubeLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.overrides.data_parallel import LightningDistributedDataParallel
+from pytorch_lightning.overrides.data_parallel import LightningDistributedDataParallel, LightningDataParallel
 
 from longformer.longformer import Longformer
 from longformer.sliding_chunks import pad_to_window_size
 
-sys.path.append(".")
+import hiddenlayer as hl
+
 from scripts.triviaqa import TriviaQADataset, TriviaQA
 
 class ModifiedTriviaQADataset(TriviaQADataset):
@@ -232,7 +234,7 @@ class InteractiveTriviaQA(TriviaQA):
         input_ids, attention_mask = pad_to_window_size(
             input_ids, attention_mask, self.args.attention_window, self.tokenizer.pad_token_id)
         sequence_output = self.model(input_ids, attention_mask=attention_mask)[0]
-        sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, self.args.max_seq_len, -1)
+        sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, sequence_output.shape[1], -1)
         p = (0, 0, 0, 0, 0, self.max_num_of_interactions-self.current_interaction_num)
         sequence_output = torch.nn.functional.pad(sequence_output, p).permute(0,2,3,1)
         weighted_sum = self.learned_weighted_sum(sequence_output)
@@ -265,7 +267,6 @@ class InteractiveTriviaQA(TriviaQA):
 
             total_loss = (start_loss + end_loss) / 2
             outputs = (total_loss,) + outputs
-
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
 
     def validation_step(self, batch, batch_nb):
@@ -398,8 +399,8 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    current_interaction_num = 1
-    max_num_of_interactions = 2
+    current_interaction_num = 0
+    max_num_of_interactions = 1
     model = InteractiveTriviaQA(args, current_interaction_num=current_interaction_num,
                                 max_num_of_interactions=max_num_of_interactions)
 

@@ -4,9 +4,9 @@ Usage: <file_name> --inp_fn=INP_FN --out_fn=OUT_FN --num_of_paraphrases=NUM_OF_P
 from docopt import docopt
 from pathlib import Path
 import json
+from tqdm import tqdm
 
 def get_paraphrase_dict(data, mode):
-    import pdb; pdb.set_trace()
     if mode == "duplicate":
         return {sample["paragraphs"][0]["qas"][0]["qid"]:
                 [sample["paragraphs"][0]["qas"][0]["question"]] * num_of_paraphrases
@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     paraphrase_dict = get_paraphrase_dict(data, mode)
     out_data = data.copy()
-    for sample in out_data:
+    for sample in tqdm(out_data):
         qid = sample["paragraphs"][0]["qas"][0]["qid"]
         sample["paragraphs"][0]["qas"][0]["question_paraphrases"] = paraphrase_dict[qid]
 
