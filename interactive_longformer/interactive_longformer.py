@@ -343,9 +343,10 @@ class InteractiveTriviaQA(TriviaQA):
         output = self.forward(input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids)
         loss = output[0]
         lr = loss.new_zeros(1) + self.trainer.optimizers[0].param_groups[0]['lr']
-        if self.current_epoch == 1:
+        import pdb; pdb.set_trace()
+        if self.current_epoch == 0:
             sample_data_loader = copy.deepcopy(self.train_dataloader())
-            sample_data = next(iter(sample_data_loader))
+            sample_data = next(iter(sample_data_loader))[:-2]
             self.logger.experiment.add_graph(InteractiveTriviaQA(self.args, self.current_interaction_num, self.max_num_of_interactions), sample_data)
 
         tensorboard_logs = {'train_loss': loss, 'lr': lr,

@@ -1,6 +1,4 @@
 import os
-import sys
-sys.path.append(".")
 from collections import defaultdict
 import argparse
 import json
@@ -21,7 +19,7 @@ from pytorch_lightning.overrides.data_parallel import LightningDistributedDataPa
 
 from longformer.longformer import Longformer
 from longformer.sliding_chunks import pad_to_window_size
-import copy
+
 
 class TriviaQADataset(Dataset):
     """
@@ -691,13 +689,13 @@ class TriviaQA(pl.LightningModule):
         self.test_dataloader_object = dl
         return self.test_dataloader_object
 
-#    def configure_ddp(self, model, device_ids):
-#        model = LightningDistributedDataParallel(
-#            model,
-#            device_ids=device_ids,
-#            find_unused_parameters=False
-#        )
-#        return model
+    def configure_ddp(self, model, device_ids):
+        model = LightningDistributedDataParallel(
+            model,
+            device_ids=device_ids,
+            find_unused_parameters=False
+        )
+        return model
 
     @staticmethod
     def add_model_specific_args(parser, root_dir):
@@ -760,13 +758,8 @@ def main(args):
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
-        # version=0
-        # always use version=0
+        version=0  # always use version=0
     )
-
-    sample_data_loader = copy.deepcopy(model.train_dataloader())
-    sample_data = next(iter(sample_data_loader))
-    logger.experiment.add_graph(model, sample_data)
 
     checkpoint_callback = ModelCheckpoint(
         filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints"),
