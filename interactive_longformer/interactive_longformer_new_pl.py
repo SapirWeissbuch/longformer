@@ -16,7 +16,7 @@ from transformers import RobertaTokenizer, AutoModel, AutoConfig, AutoModelWithL
 from scripts.triviaqa_utils import evaluation_utils
 
 import pytorch_lightning as pl
-from pytorch_lightning.logging import TestTubeLogger
+from pytorch_lightning.loggers import TestTubeLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.overrides.data_parallel import LightningDistributedDataParallel, LightningDataParallel
 
@@ -25,7 +25,7 @@ from longformer.sliding_chunks import pad_to_window_size
 
 import hiddenlayer as hl
 
-from scripts.triviaqa import TriviaQADataset, TriviaQA
+from scripts.triviaqa_new_pl import TriviaQADataset, TriviaQA
 
 class ModifiedTriviaQADataset(TriviaQADataset):
     def __init__(self, file_path, tokenizer, max_seq_len, max_doc_len, doc_stride,
@@ -34,6 +34,7 @@ class ModifiedTriviaQADataset(TriviaQADataset):
         super().__init__(file_path, tokenizer, max_seq_len, max_doc_len, doc_stride,
                  max_num_answers, ignore_seq_with_no_answers, max_question_len)
         self.num_of_interactions = num_of_interactions
+
 
     def __getitem__(self, idx):
         entry = self.data_json[idx]
@@ -218,9 +219,20 @@ class InteractiveTriviaQA(TriviaQA):
         self.current_interaction_num = current_interaction_num
         self.max_num_of_interactions = max_num_of_interactions
         self.learned_weighted_sum = torch.nn.Linear(self.max_num_of_interactions+1, 1)
+        dataset = ModifiedTriviaQADataset(file_path=self.args.train_dataset, tokenizer=self.tokenizer,
+                                  max_seq_len=self.args.max_seq_len, max_doc_len=self.args.max_doc_len,
+                                  doc_stride=self.args.doc_stride,
+                                  max_num_answers=self.args.max_num_answers,
+                                  max_question_len=self.args.max_question_len,
+                                  ignore_seq_with_no_answers=self.args.ignore_seq_with_no_answers,
+                                  num_of_interactions=self.current_interaction_num)
+        input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids, _, _ = dataset[0]
+        self.example_input_array = (input_ids.to(self.device), input_mask.to(self.device), segment_ids.to(self.device),
+                                   subword_starts.to(self.device), subword_ends.to(self.device), answer_token_ids.to(self.device))
+
 
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
-#        import pdb; pdb.set_trace()
+
         batch_size = input_ids.shape[0]
         input_ids = input_ids.view(batch_size * (self.current_interaction_num+1), -1)
         attention_mask = attention_mask.view(batch_size * (self.current_interaction_num+1), -1)
@@ -235,7 +247,8 @@ class InteractiveTriviaQA(TriviaQA):
         # sliding_chunks implemenation of selfattention requires that seqlen is multiple of window size
         input_ids, attention_mask = pad_to_window_size(
             input_ids, attention_mask, self.args.attention_window, self.tokenizer.pad_token_id)
-        sequence_output = self.model(input_ids, attention_mask=attention_mask)[0]
+        sequence_output = self.model.forward(input_ids, attention_mask=attention_mask)[0]
+        import pdb; pdb.set_trace()
         sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, sequence_output.shape[1], -1)
         p = (0, 0, 0, 0, 0, self.max_num_of_interactions-self.current_interaction_num)
         sequence_output = torch.nn.functional.pad(sequence_output, p).permute(0,2,3,1)
@@ -350,7 +363,7 @@ class InteractiveTriviaQA(TriviaQA):
         return {'loss': loss, 'log': tensorboard_logs}
 
 
-    @pl.data_loader
+
     def train_dataloader(self):
         if self.train_dataloader_object is not None:
             return self.train_dataloader_object
@@ -368,7 +381,7 @@ class InteractiveTriviaQA(TriviaQA):
         self.train_dataloader_object = dl
         return self.train_dataloader_object
 
-    @pl.data_loader
+
     def test_dataloader(self):
         if self.test_dataloader_object is not None:
             return self.test_dataloader_object
@@ -385,7 +398,7 @@ class InteractiveTriviaQA(TriviaQA):
         self.test_dataloader_object = dl
         return self.test_dataloader_object
 
-    @pl.data_loader
+
     def val_dataloader(self):
         if self.val_dataloader_object is not None:
             return self.val_dataloader_object
@@ -419,19 +432,19 @@ def main(args):
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
+        # log_graph=True
         # version=0 # always use version=0
     )
 
-
     checkpoint_callback = ModelCheckpoint(
-        filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints"),
+        dirpath=os.path.join(args.save_dir, args.save_prefix),
+        filename="checkpoints",
         save_top_k=5,
         verbose=True,
         monitor='avg_val_loss',
-        # save_last=True
+        # save_last=True,
         mode='min',
         period=-1,
-        prefix=''
     )
 
     print(args)
@@ -440,20 +453,20 @@ def main(args):
     print(f'>>>>>>> #steps: {args.steps}, #epochs: {args.epochs}, batch_size: {args.batch_size * args.gpus} <<<<<<<')
 
     trainer = pl.Trainer(gpus=args.gpus, distributed_backend='ddp' if args.gpus and args.gpus > 1 else None,
-                         track_grad_norm=-1, max_epochs=args.epochs, early_stop_callback=None,
+                         track_grad_norm=-1, max_epochs=args.epochs,
                          replace_sampler_ddp=False,
                          accumulate_grad_batches=args.batch_size,
                          val_check_interval=args.val_every,
                          num_sanity_val_steps=2,
                          # check_val_every_n_epoch=2,
-                         val_percent_check=args.val_percent_check,
-                         test_percent_check=args.val_percent_check,
+                         limit_val_batches=args.val_percent_check,
+                         limit_test_batches=args.val_percent_check,
                          logger=logger if not args.disable_checkpointing else False,
                          checkpoint_callback=checkpoint_callback if not args.disable_checkpointing else False,
-                         show_progress_bar=not args.no_progress_bar,
-                         use_amp=not args.fp32, amp_level='O2',
+                         amp_level='O2',
                          resume_from_checkpoint=args.resume_ckpt,
                          )
+
     if not args.test:
         trainer.fit(model)
     trainer.test(model)

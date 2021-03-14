@@ -4,14 +4,14 @@ save_prefix,output_dir
 train_dataset,data/squad-wikipedia-train-4096.json
 dev_dataset,data/squad-wikipedia-dev-4096.json
 batch_size,1
-gpus,2
+gpus,1
 warmup,1000
 lr,3e-05
 val_every,0.5
 val_percent_check,1.0
 num_workers,1
 seed,4321
-epochs,4
+epochs,1
 max_seq_len,512
 max_doc_len,4096
 max_num_answers,64
