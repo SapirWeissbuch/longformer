@@ -3,6 +3,8 @@ output/
 longformer_model/
 incubator-tvm/
 longformer-large-4096/
+other_models/
+checkpoints/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

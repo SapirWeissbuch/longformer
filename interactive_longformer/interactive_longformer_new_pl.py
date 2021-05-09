@@ -248,7 +248,6 @@ class InteractiveTriviaQA(TriviaQA):
         input_ids, attention_mask = pad_to_window_size(
             input_ids, attention_mask, self.args.attention_window, self.tokenizer.pad_token_id)
         sequence_output = self.model.forward(input_ids, attention_mask=attention_mask)[0]
-        import pdb; pdb.set_trace()
         sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, sequence_output.shape[1], -1)
         p = (0, 0, 0, 0, 0, self.max_num_of_interactions-self.current_interaction_num)
         sequence_output = torch.nn.functional.pad(sequence_output, p).permute(0,2,3,1)
@@ -433,7 +432,7 @@ def main(args):
         save_dir=args.save_dir,
         name=args.save_prefix,
         # log_graph=True
-        # version=0 # always use version=0
+        version=0 # always use version=0
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -445,6 +444,7 @@ def main(args):
         # save_last=True,
         mode='min',
         period=-1,
+        every_n_train_steps=1000
     )
 
     print(args)

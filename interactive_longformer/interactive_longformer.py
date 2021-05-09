@@ -219,22 +219,58 @@ class InteractiveTriviaQA(TriviaQA):
         self.max_num_of_interactions = max_num_of_interactions
         self.learned_weighted_sum = torch.nn.Linear(self.max_num_of_interactions+1, 1)
 
+    def load_model(self):
+        if 'longformer' in self.args.model_path:
+            model = Longformer.from_pretrained(self.args.model_path)
+            for layer in model.encoder.layer:
+                layer.attention.self.attention_mode = self.args.attention_mode
+                self.args.attention_window = layer.attention.self.attention_window
+        elif self.args.model_path in ['bart.large', 'bart.base']:
+            model = torch.hub.load('pytorch/fairseq', self.args.model_path)
+            model.config = model.args
+            model.config.hidden_size = model.config.decoder_output_dim
+        elif 'bart' in self.args.model_path and 'base' in self.args.model_path:
+            config = AutoConfig.from_pretrained(self.args.model_path)
+            config.encoder_attention_heads = 12
+            config.decoder_attention_heads = 12
+            config.attention_dropout = 0.1
+            if self.args.seq2seq:
+                model = AutoModelWithLMHead.from_pretrained(self.args.model_path, config=config)
+            else:
+                model = AutoModel.from_pretrained(self.args.model_path, config=config)
+        elif 'bart' in self.args.model_path and 'large' in self.args.model_path:
+            config = AutoConfig.from_pretrained(self.args.model_path)
+            config.attention_dropout = 0.1
+            config.gradient_checkpointing = True
+            if self.args.seq2seq:
+                model = AutoModelWithLMHead.from_pretrained(self.args.model_path, config=config)
+            else:
+                model = AutoModel.from_pretrained(self.args.model_path, config=config)
+        else:
+            model = AutoModel.from_pretrained(str(self.args.model_path), cache_dir="other_models")
+
+        print("Loaded model with config:")
+        print(model.config)
+
+        for p in model.parameters():
+            p.requires_grad_(True)
+        model.train()
+        return model
+
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
-#        import pdb; pdb.set_trace()
         batch_size = input_ids.shape[0]
         input_ids = input_ids.view(batch_size * (self.current_interaction_num+1), -1)
         attention_mask = attention_mask.view(batch_size * (self.current_interaction_num+1), -1)
         question_end_index = self._get_question_end_index(input_ids)
-        # Each batch is one document, and each row of the batch is a chunck of the document.
-        # Make sure all rows have the same question length.
-        # assert (question_end_index[0].float() == question_end_index.float().mean()).item()
-        # local attention everywhere, global attention on question
-        tri = torch.tril(torch.ones([input_ids.shape[1],input_ids.shape[1]], dtype=torch.long, device=input_ids.device), diagonal=-1)
-        attention_mask = tri[question_end_index] + 1
 
-        # sliding_chunks implemenation of selfattention requires that seqlen is multiple of window size
-        input_ids, attention_mask = pad_to_window_size(
-            input_ids, attention_mask, self.args.attention_window, self.tokenizer.pad_token_id)
+        if 'longformer' in self.args.model_path:
+            tri = torch.tril(torch.ones([input_ids.shape[1],input_ids.shape[1]], dtype=torch.long, device=input_ids.device), diagonal=-1)
+            attention_mask = tri[question_end_index] + 1
+            # sliding_chunks implemenation of selfattention requires that seqlen is multiple of window size
+            input_ids, attention_mask = pad_to_window_size(
+                input_ids, attention_mask, self.args.attention_window, self.tokenizer.pad_token_id)
+
+
         sequence_output = self.model(input_ids, attention_mask=attention_mask)[0]
         sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, sequence_output.shape[1], -1)
         p = (0, 0, 0, 0, 0, self.max_num_of_interactions-self.current_interaction_num)
@@ -344,6 +380,12 @@ class InteractiveTriviaQA(TriviaQA):
         output = self.forward(input_ids, input_mask, segment_ids, subword_starts, subword_ends, answer_token_ids)
         loss = output[0]
         lr = loss.new_zeros(1) + self.trainer.optimizers[0].param_groups[0]['lr']
+#        if self.current_epoch == 0:
+#            model = InteractiveTriviaQA(self.args, self.current_interaction_num, self.max_num_of_interactions)
+#            self.logger.experiment.add_graph(model,
+#                                             (input_ids.to("cpu"), input_mask.to("cpu"),
+#                                              segment_ids.to("cpu"), subword_starts.to("cpu"), subword_ends.to("cpu"),
+#                                              answer_token_ids.to("cpu")))
         tensorboard_logs = {'train_loss': loss, 'lr': lr,
                             'input_size': input_ids.numel(),
                             'mem': torch.cuda.memory_allocated(input_ids.device) / 1024 ** 3}
@@ -411,15 +453,15 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    current_interaction_num = 0
-    max_num_of_interactions = 1
+    current_interaction_num = 1
+    max_num_of_interactions = 3
     model = InteractiveTriviaQA(args, current_interaction_num=current_interaction_num,
                                 max_num_of_interactions=max_num_of_interactions)
 
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
-        # version=0 # always use version=0
+        version=0 # always use version=0
     )
 
 
