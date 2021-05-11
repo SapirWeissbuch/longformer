@@ -17,6 +17,7 @@ from scripts.triviaqa_utils import evaluation_utils
 
 import pytorch_lightning as pl
 from pytorch_lightning.logging import TestTubeLogger
+from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.overrides.data_parallel import LightningDistributedDataParallel, LightningDataParallel
 
@@ -453,7 +454,7 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    current_interaction_num = 1
+    current_interaction_num = 0
     max_num_of_interactions = 3
     model = InteractiveTriviaQA(args, current_interaction_num=current_interaction_num,
                                 max_num_of_interactions=max_num_of_interactions)
@@ -461,7 +462,7 @@ def main(args):
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
-        version=0 # always use version=0
+        # version=0 # always use version=0
     )
 
 
@@ -475,6 +476,8 @@ def main(args):
         period=-1,
         prefix=''
     )
+
+    wandb_logger = WandbLogger(name='Interaction 1 of 3',project='Teacher Feedback Project', log_model=True)
 
     print(args)
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
@@ -490,7 +493,7 @@ def main(args):
                          # check_val_every_n_epoch=2,
                          val_percent_check=args.val_percent_check,
                          test_percent_check=args.val_percent_check,
-                         logger=logger if not args.disable_checkpointing else False,
+                         logger=wandb_logger if not args.disable_checkpointing else False,
                          checkpoint_callback=checkpoint_callback if not args.disable_checkpointing else False,
                          show_progress_bar=not args.no_progress_bar,
                          use_amp=not args.fp32, amp_level='O2',
