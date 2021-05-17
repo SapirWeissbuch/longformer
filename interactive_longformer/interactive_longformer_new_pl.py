@@ -8,6 +8,7 @@ import json
 import string
 import random
 import numpy as np
+from datetime import datetime
 import torch
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -23,8 +24,10 @@ from pytorch_lightning.overrides.data_parallel import LightningDistributedDataPa
 from longformer.longformer import Longformer
 from longformer.sliding_chunks import pad_to_window_size
 
-import hiddenlayer as hl
+from pytorch_lightning.loggers import WandbLogger
 
+import hiddenlayer as hl
+import wandb
 from scripts.triviaqa_new_pl import TriviaQADataset, TriviaQA
 
 class ModifiedTriviaQADataset(TriviaQADataset):
@@ -444,8 +447,9 @@ def main(args):
         # save_last=True,
         mode='min',
         period=-1,
-        every_n_train_steps=1000
     )
+
+    wandb_logger = WandbLogger(name='Interaction 0 of 3 1024',project='Teacher Feedback Project', log_model=True)
 
     print(args)
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
@@ -461,7 +465,7 @@ def main(args):
                          # check_val_every_n_epoch=2,
                          limit_val_batches=args.val_percent_check,
                          limit_test_batches=args.val_percent_check,
-                         logger=logger if not args.disable_checkpointing else False,
+                         logger=wandb_logger if not args.disable_checkpointing else False,
                          checkpoint_callback=checkpoint_callback if not args.disable_checkpointing else False,
                          amp_level='O2',
                          resume_from_checkpoint=args.resume_ckpt,
@@ -469,6 +473,14 @@ def main(args):
 
     if not args.test:
         trainer.fit(model)
+        os.path.join(args.save_dir, args.save_prefix)
+        now = datetime.now()
+        save_string = now.strftime("final-model-%m/%d/%Y-%H:%M:%S")
+        trainer.save_checkpoint(os.path.join(args.save_dir, args.save_prefix,save_string))
+        martifact = wandb.Artifact('final_model.ckpt', type='model')
+        martifact.add_file(os.path.join(args.save_dir, args.save_prefix,save_string))
+        wandb_logger.experiment.log_artifact(martifact)
+
     trainer.test(model)
 
 

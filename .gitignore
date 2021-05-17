@@ -8,6 +8,9 @@ checkpoints/
 *.ckpt
 wandb
 slurm/interactive.out
+slurm
+predictions.json
+triviaqa/interactive
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

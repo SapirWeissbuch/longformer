@@ -27,6 +27,7 @@ from longformer.sliding_chunks import pad_to_window_size
 import hiddenlayer as hl
 
 from scripts.triviaqa import TriviaQADataset, TriviaQA
+import wandb
 
 class ModifiedTriviaQADataset(TriviaQADataset):
     def __init__(self, file_path, tokenizer, max_seq_len, max_doc_len, doc_stride,
@@ -467,11 +468,11 @@ def main(args):
 
 
     checkpoint_callback = ModelCheckpoint(
-        filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints"),
+        filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints", "model_{epoch:02d}-{val_loss:.2f}"),
         save_top_k=5,
         verbose=True,
         monitor='avg_val_loss',
-        # save_last=True
+#        save_last=True,
         mode='min',
         period=-1,
         prefix=''
