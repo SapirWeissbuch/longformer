@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append('.')
 from collections import defaultdict
 import argparse
 import json
@@ -20,6 +22,9 @@ from pytorch_lightning.overrides.data_parallel import LightningDistributedDataPa
 from longformer.longformer import Longformer
 from longformer.sliding_chunks import pad_to_window_size
 
+from pytorch_lightning.loggers import WandbLogger
+import wandb
+from datetime import datetime
 
 class TriviaQADataset(Dataset):
     """
@@ -772,6 +777,9 @@ def main(args):
         period=-1,
     )
 
+    wandb_logger = WandbLogger(name='Original Model',project='Teacher Feedback Project', log_model=True)
+
+
     print(args)
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
     args.steps = args.epochs * train_set_size / (args.batch_size * max(args.gpus, 1))
@@ -786,13 +794,21 @@ def main(args):
                          # check_val_every_n_epoch=2,
                          limit_val_batches=args.val_percent_check,
                          limit_test_batches=args.val_percent_check,
-                         logger=logger if not args.disable_checkpointing else False,
+                         logger=wandb_logger if not args.disable_checkpointing else False,
                          checkpoint_callback=checkpoint_callback if not args.disable_checkpointing else False,
                          amp_level='O2',
                          resume_from_checkpoint=args.resume_ckpt,
                          )
     if not args.test:
         trainer.fit(model)
+        os.path.join(args.save_dir, args.save_prefix)
+        now = datetime.now()
+        save_string = now.strftime("final-model-%m/%d/%Y-%H:%M:%S")
+        trainer.save_checkpoint(os.path.join(args.save_dir, args.save_prefix,save_string))
+        martifact = wandb.Artifact('final_model.ckpt', type='model')
+        martifact.add_file(os.path.join(args.save_dir, args.save_prefix,save_string))
+        wandb_logger.experiment.log_artifact(martifact)
+
     trainer.test(model)
 
 
