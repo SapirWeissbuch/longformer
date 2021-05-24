@@ -777,7 +777,7 @@ def main(args):
         period=-1,
     )
 
-    wandb_logger = WandbLogger(name='Original Model',project='Teacher Feedback Project', log_model=True)
+    wandb_logger = WandbLogger(name='Original TriviaQA Model',project='Teacher Feedback Project', log_model=True)
 
 
     print(args)
