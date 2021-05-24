@@ -746,7 +746,8 @@ class TriviaQA(pl.LightningModule):
         parser.add_argument("--fp32", action='store_true', help="default is fp16. Use --fp32 to switch to fp32")
         parser.add_argument("--seq2seq", action='store_true', help="Use an answer generation model")
         parser.add_argument("--resume_ckpt", type=str, help="Path of a checkpoint to resume from")
-
+        parser.add_argument("--run_name", type=str, help="wandb run name", default="unnamed_run")
+        parser.add_argument("--project_name", type=str, help="wandb project name", default="Teacher Feedback Project")
 
         return parser
 
@@ -763,7 +764,7 @@ def main(args):
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
-        version=0  # always use version=0
+#        version=0  # always use version=0
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -777,7 +778,7 @@ def main(args):
         period=-1,
     )
 
-    wandb_logger = WandbLogger(name='Original TriviaQA Model',project='Teacher Feedback Project', log_model=True)
+    wandb_logger = WandbLogger(name=args.run_name, project=args.project_name)
 
 
     print(args)
@@ -803,10 +804,10 @@ def main(args):
         trainer.fit(model)
         os.path.join(args.save_dir, args.save_prefix)
         now = datetime.now()
-        save_string = now.strftime("final-model-%m/%d/%Y-%H:%M:%S")
-        trainer.save_checkpoint(os.path.join(args.save_dir, args.save_prefix,save_string))
+        save_string = now.strftime("final-model-%m%d%Y-%H:%M:%S")
+        trainer.save_checkpoint(os.path.join(args.save_dir, args.save_prefix, save_string))
         martifact = wandb.Artifact('final_model.ckpt', type='model')
-        martifact.add_file(os.path.join(args.save_dir, args.save_prefix,save_string))
+        martifact.add_file(os.path.join(args.save_dir, args.save_prefix, save_string))
         wandb_logger.experiment.log_artifact(martifact)
 
     trainer.test(model)

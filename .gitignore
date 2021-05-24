@@ -12,6 +12,7 @@ slurm
 predictions.json
 triviaqa/interactive
 predictions
+triviaqa
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

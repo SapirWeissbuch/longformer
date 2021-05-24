@@ -5,6 +5,8 @@ import json
 import string
 import random
 import numpy as np
+import sys
+sys.path.append(".")
 import torch
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -19,6 +21,10 @@ from pytorch_lightning.overrides.data_parallel import LightningDistributedDataPa
 
 from longformer.longformer import Longformer
 from longformer.sliding_chunks import pad_to_window_size
+
+from pytorch_lightning.loggers import WandbLogger
+import wandb
+from datetime import datetime
 
 
 class TriviaQADataset(Dataset):
@@ -624,7 +630,7 @@ class TriviaQA(pl.LightningModule):
             top_answer = sorted(answer_metrics, key=lambda x: x['answer_score'], reverse=True)[0]
             qid_to_answer_text[qid] = top_answer['answer_text']
 
-        with open('predictions.json', 'w') as f:
+        with open(self.args.predictions_fn, 'w+') as f:
             json.dump(qid_to_answer_text, f)
 
         return {'count': len(qid_to_answer_text)}
@@ -741,6 +747,9 @@ class TriviaQA(pl.LightningModule):
         parser.add_argument("--fp32", action='store_true', help="default is fp16. Use --fp32 to switch to fp32")
         parser.add_argument("--seq2seq", action='store_true', help="Use an answer generation model")
         parser.add_argument("--resume_ckpt", type=str, help="Path of a checkpoint to resume from")
+        parser.add_argument("--run_name", type=str, help="wandb run name", default="unnamed_run")
+        parser.add_argument("--project_name", type=str, help="wandb project name", default="Teacher Feedback Project")
+        parser.add_argument("--predictions_fn", type=str, help="file name for predictions", required=True)
 
 
         return parser
@@ -758,7 +767,7 @@ def main(args):
     logger = TestTubeLogger(
         save_dir=args.save_dir,
         name=args.save_prefix,
-        version=0  # always use version=0
+#        version=0  # always use version=0
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -772,6 +781,7 @@ def main(args):
         prefix=''
     )
 
+    wandb_logger = WandbLogger(name=args.run_name, project=args.project_name)
     print(args)
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
     args.steps = args.epochs * train_set_size / (args.batch_size * max(args.gpus, 1))
@@ -786,7 +796,7 @@ def main(args):
                          # check_val_every_n_epoch=2,
                          val_percent_check=args.val_percent_check,
                          test_percent_check=args.val_percent_check,
-                         logger=logger if not args.disable_checkpointing else False,
+                         logger=wandb_logger if not args.disable_checkpointing else False,
                          checkpoint_callback=checkpoint_callback if not args.disable_checkpointing else False,
                          show_progress_bar=not args.no_progress_bar,
                          use_amp=not args.fp32, amp_level='O2',
@@ -794,6 +804,14 @@ def main(args):
                          )
     if not args.test:
         trainer.fit(model)
+        os.path.join(args.save_dir, args.save_prefix)
+        now = datetime.now()
+        save_string = now.strftime("final-model-%m%d%Y-%H:%M:%S")
+        trainer.save_checkpoint(os.path.join(args.save_dir, args.save_prefix, save_string))
+        martifact = wandb.Artifact('final_model.ckpt', type='model')
+        martifact.add_file(os.path.join(args.save_dir, args.save_prefix, save_string))
+        wandb_logger.experiment.log_artifact(martifact)
+
     trainer.test(model)
 
 

@@ -419,6 +419,13 @@ class InteractiveTriviaQA(TriviaQA):
         return self.val_dataloader_object
 
 
+    @staticmethod
+    def add_interactive_specific_args(parser):
+        parser.add_argument("--total_interactions_num", type=int, help="Total number of interactions available in this run")
+        parser.add_argument("--current_added_interactions", type=int, help="Number of interactions added")
+        return parser
+
+
 def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -426,10 +433,8 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    current_interaction_num = 0
-    max_num_of_interactions = 1
-    model = InteractiveTriviaQA(args, current_interaction_num=current_interaction_num,
-                                max_num_of_interactions=max_num_of_interactions)
+    model = InteractiveTriviaQA(args, current_interaction_num=args.current_added_interactions,
+                                max_num_of_interactions=args.total_interactions_num)
 
     logger = TestTubeLogger(
         save_dir=args.save_dir,
@@ -449,7 +454,7 @@ def main(args):
         period=-1,
     )
 
-    wandb_logger = WandbLogger(name='Interaction 0 of 3 1024',project='Teacher Feedback Project', log_model=True)
+    wandb_logger = WandbLogger(name=args.run_name, project=args.project_name)
 
     print(args)
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
@@ -487,5 +492,6 @@ def main(args):
 if __name__ == "__main__":
     main_arg_parser = argparse.ArgumentParser(description="triviaQa")
     parser = TriviaQA.add_model_specific_args(main_arg_parser, os.getcwd())
+    parser = InteractiveTriviaQA.add_interactive_specific_args(parser)
     args = parser.parse_args()
     main(args)
