@@ -764,18 +764,17 @@ def main(args):
 
     model = TriviaQA(args)
 
-    logger = TestTubeLogger(
-        save_dir=args.save_dir,
-        name=args.save_prefix,
-#        version=0  # always use version=0
-    )
+    now = datetime.now()
+    save_dir = now.strftime("%m%d%Y-%H:%M:%S")
 
+    directory = os.path.join(args.save_dir, args.save_prefix, save_dir, "chekpointsx")
+    print("DIRECTORY")
     checkpoint_callback = ModelCheckpoint(
-        filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints"),
+        filepath=os.path.join(args.save_dir, args.save_prefix, save_dir, "checkpoints"),
         save_top_k=5,
         verbose=True,
         monitor='avg_val_loss',
-        # save_last=True,
+        save_last=True,
         mode='min',
         period=-1,
         prefix=''
@@ -792,7 +791,7 @@ def main(args):
                          replace_sampler_ddp=False,
                          accumulate_grad_batches=args.batch_size,
                          val_check_interval=args.val_every,
-                         num_sanity_val_steps=2,
+                         num_sanity_val_steps=0,
                          # check_val_every_n_epoch=2,
                          val_percent_check=args.val_percent_check,
                          test_percent_check=args.val_percent_check,
