@@ -216,11 +216,9 @@ class ModifiedTriviaQADataset(TriviaQADataset):
 
 
 class InteractiveTriviaQA(TriviaQA):
-    def __init__(self, args, max_num_of_interactions):
+    def __init__(self, args):
         super().__init__(args)
-        self.current_interaction_num = current_interaction_num
-        self.max_num_of_interactions = max_num_of_interactions
-        self.learned_weighted_sum = torch.nn.Linear(self.max_num_of_interactions+1, 1)
+        self.learned_weighted_sum = torch.nn.Linear(self.args.total_interactions_num+1, 1)
 
     def load_model(self):
         if 'longformer' in self.args.model_path:
@@ -263,8 +261,8 @@ class InteractiveTriviaQA(TriviaQA):
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
         batch_size = input_ids.shape[0]
         current_interaction_num = input_ids.shape[1]
-        input_ids = input_ids.view(batch_size * (self.current_interaction_num+1), -1)
-        attention_mask = attention_mask.view(batch_size * (self.current_interaction_num+1), -1)
+        input_ids = input_ids.view(batch_size * (current_interaction_num+1), -1)
+        attention_mask = attention_mask.view(batch_size * (current_interaction_num+1), -1)
         question_end_index = self._get_question_end_index(input_ids)
 
         if 'longformer' in self.args.model_path:
@@ -276,8 +274,8 @@ class InteractiveTriviaQA(TriviaQA):
 
 
         sequence_output = self.model(input_ids, attention_mask=attention_mask)[0]
-        sequence_output = sequence_output.view(batch_size, self.current_interaction_num+1, sequence_output.shape[1], -1)
-        p = (0, 0, 0, 0, 0, self.max_num_of_interactions-self.current_interaction_num)
+        sequence_output = sequence_output.view(batch_size, current_interaction_num+1, sequence_output.shape[1], -1)
+        p = (0, 0, 0, 0, 0, self.args.total_interactions_num-current_interaction_num)
         sequence_output = torch.nn.functional.pad(sequence_output, p).permute(0,2,3,1)
         weighted_sum = self.learned_weighted_sum(sequence_output)
         weighted_sum.squeeze_(-1)
@@ -440,7 +438,7 @@ class InteractiveTriviaQA(TriviaQA):
                                   doc_stride=self.args.doc_stride,
                                   max_num_answers=self.args.max_num_answers,
                                   max_question_len=self.args.max_question_len,
-                                          ignore_seq_with_no_answers=False, num_of_interactions=self.current_interaction_num)
+                                          ignore_seq_with_no_answers=False, num_of_interactions=self.args.total_interactions_num)
         # evaluation data should keep all examples
         sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=False) if self.trainer.use_ddp else None
         dl = DataLoader(dataset, batch_size=1, shuffle=False,
@@ -462,8 +460,7 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    model = InteractiveTriviaQA(args, current_interaction_num=2,
-                                max_num_of_interactions=args.total_interactions_num)
+    model = InteractiveTriviaQA(args)
 
 #    logger = TestTubeLogger(
 #        save_dir=args.save_dir,

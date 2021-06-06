@@ -22,3 +22,16 @@ python -m interactive_longformer.data_processing.process_for_interactive_trainin
        --seed=42
 
 (same with train data)
+
+### Interactive training script:
+python -m interactive_longformer.interactive_longformer  \
+    --train_dataset data/partitioned_5_squad-wikipedia-train-4096.json  \
+    --dev_dataset data/partitioned_5_squad-wikipedia-dev-4096.json  \
+    --gpus 1  --batch_size 8  --num_workers 4 \
+    --lr 0.00003 --warmup 1000 --epochs 4  --max_seq_len 4096 --doc_stride -1  \
+    --save_prefix original  \
+    --model_path longformer_model/longformer-large-4096  --seed 4321 \
+    --project_name "Question Paraphrases" \
+    --run_name "5 Duplicates - Interactive Training" \
+    --total_interactions_num 5 \
+    --predictions_fn predictions/duplicates_5_interactive_training.json \
