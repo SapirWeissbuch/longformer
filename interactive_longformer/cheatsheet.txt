@@ -14,4 +14,11 @@ python -m scripts.triviaqa  \
     --run_name "Original TriviaQA model" \
     --predictions_fn predictions/original_triviaqa_model.json \
 
-### Train
+### Creating data for interactive training:
+python -m interactive_longformer.data_processing.process_for_interactive_training \
+       --inp_fn=data/squad-wikipedia-dev-4096.json \
+       --out_fn=data/partitioned_5_squad-wikipedia-dev-4096.json \
+       --max_num_of_paraphrases=5 \
+       --seed=42
+
+(same with train data)
