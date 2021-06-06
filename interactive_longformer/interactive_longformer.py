@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
 
+from datetime import datetime
 from torch.utils.data import DataLoader, Dataset
 from transformers import RobertaTokenizer, AutoModel, AutoConfig, AutoModelWithLMHead
 from scripts.triviaqa_utils import evaluation_utils
@@ -215,7 +216,7 @@ class ModifiedTriviaQADataset(TriviaQADataset):
 
 
 class InteractiveTriviaQA(TriviaQA):
-    def __init__(self, args, current_interaction_num, max_num_of_interactions):
+    def __init__(self, args, max_num_of_interactions):
         super().__init__(args)
         self.current_interaction_num = current_interaction_num
         self.max_num_of_interactions = max_num_of_interactions
@@ -261,6 +262,7 @@ class InteractiveTriviaQA(TriviaQA):
 
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
         batch_size = input_ids.shape[0]
+        current_interaction_num = input_ids.shape[1]
         input_ids = input_ids.view(batch_size * (self.current_interaction_num+1), -1)
         attention_mask = attention_mask.view(batch_size * (self.current_interaction_num+1), -1)
         question_end_index = self._get_question_end_index(input_ids)
@@ -447,6 +449,11 @@ class InteractiveTriviaQA(TriviaQA):
         self.val_dataloader_object = dl
         return self.val_dataloader_object
 
+    @staticmethod
+    def add_interactive_specific_args(parser):
+        parser.add_argument("--total_interactions_num", type=int, help="Total number of interactions available in this run", required=True)
+#        parser.add_argument("--current_added_interactions", type=int, help="Number of interactions added")
+        return parser
 
 def main(args):
     random.seed(args.seed)
@@ -455,30 +462,30 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    current_interaction_num = 0
-    max_num_of_interactions = 3
-    model = InteractiveTriviaQA(args, current_interaction_num=current_interaction_num,
-                                max_num_of_interactions=max_num_of_interactions)
+    model = InteractiveTriviaQA(args, current_interaction_num=2,
+                                max_num_of_interactions=args.total_interactions_num)
 
-    logger = TestTubeLogger(
-        save_dir=args.save_dir,
-        name=args.save_prefix,
-        # version=0 # always use version=0
-    )
+#    logger = TestTubeLogger(
+#        save_dir=args.save_dir,
+#        name=args.save_prefix,
+#        # version=0 # always use version=0
+#    )
 
+    now = datetime.now()
+    save_dir = now.strftime("%m%d%Y-%H:%M:%S")
 
     checkpoint_callback = ModelCheckpoint(
-        filepath=os.path.join(args.save_dir, args.save_prefix, "checkpoints", "model_{epoch:02d}-{val_loss:.2f}"),
+        filepath=os.path.join(args.save_dir, args.save_prefix, save_dir, "checkpoints"),
         save_top_k=5,
         verbose=True,
         monitor='avg_val_loss',
-#        save_last=True,
+        save_last=True,
         mode='min',
         period=-1,
         prefix=''
     )
 
-    wandb_logger = WandbLogger(name='Interaction 0 of 3 1024',project='Teacher Feedback Project', log_model=True)
+    wandb_logger = WandbLogger(name=args.run_name, project=args.project_name)
 
     print(args)
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
@@ -502,11 +509,19 @@ def main(args):
                          )
     if not args.test:
         trainer.fit(model)
+        os.path.join(args.save_dir, args.save_prefix)
+        now = datetime.now()
+        save_string = now.strftime("final-model-%m%d%Y-%H:%M:%S")
+        trainer.save_checkpoint(os.path.join(args.save_dir, args.save_prefix, save_string))
+        martifact = wandb.Artifact('final_model.ckpt', type='model')
+        martifact.add_file(os.path.join(args.save_dir, args.save_prefix, save_string))
+        wandb_logger.experiment.log_artifact(martifact)
     trainer.test(model)
 
 
 if __name__ == "__main__":
     main_arg_parser = argparse.ArgumentParser(description="triviaQa")
     parser = TriviaQA.add_model_specific_args(main_arg_parser, os.getcwd())
+    parser = InteractiveTriviaQA.add_interactive_specific_args(parser)
     args = parser.parse_args()
     main(args)

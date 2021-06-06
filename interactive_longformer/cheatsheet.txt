@@ -1,0 +1,17 @@
+# Cheatsheet for Interactive Project
+
+* All scripts should be run from project's main directory ("longformer")
+
+### Train original triviaqa longformer model (reproduce results from Longformer's paper):
+python -m scripts.triviaqa  \
+    --train_dataset data/squad-wikipedia-train-4096.json  \
+    --dev_dataset data/squad-wikipedia-dev-4096.json  \
+    --gpus 1  --batch_size 8  --num_workers 4 \
+    --lr 0.00003 --warmup 1000 --epochs 4  --max_seq_len 4096 --doc_stride -1  \
+    --save_prefix original  \
+    --model_path longformer_model/longformer-large-4096  --seed 4321 \
+    --project_name "Question Paraphrases" \
+    --run_name "Original TriviaQA model" \
+    --predictions_fn predictions/original_triviaqa_model.json \
+
+### Train
