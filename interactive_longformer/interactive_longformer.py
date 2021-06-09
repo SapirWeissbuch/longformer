@@ -260,7 +260,7 @@ class InteractiveTriviaQA(TriviaQA):
 
     def forward(self, input_ids, attention_mask, segment_ids, start_positions, end_positions, answer_token_ids):
         batch_size = input_ids.shape[0]
-        current_interaction_num = input_ids.shape[1]
+        current_interaction_num = input_ids.shape[1] - 1
         input_ids = input_ids.view(batch_size * (current_interaction_num+1), -1)
         attention_mask = attention_mask.view(batch_size * (current_interaction_num+1), -1)
         question_end_index = self._get_question_end_index(input_ids)
@@ -404,7 +404,7 @@ class InteractiveTriviaQA(TriviaQA):
                                   max_num_answers=self.args.max_num_answers,
                                   max_question_len=self.args.max_question_len,
                                   ignore_seq_with_no_answers=self.args.ignore_seq_with_no_answers,
-                                  num_of_interactions=self.current_interaction_num)
+                                          num_of_interactions=self.args.total_interactions_num)
         sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=True) if self.trainer.use_ddp else None
         dl = DataLoader(dataset, batch_size=1, shuffle=(sampler is None),
                         num_workers=self.args.num_workers, sampler=sampler,
