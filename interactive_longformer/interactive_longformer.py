@@ -421,7 +421,7 @@ class InteractiveTriviaQA(TriviaQA):
                                   doc_stride=self.args.doc_stride,
                                   max_num_answers=self.args.max_num_answers,
                                   max_question_len=self.args.max_question_len,
-                                          ignore_seq_with_no_answers=False, num_of_interactions=self.current_interaction_num)  # evaluation data should keep all example
+                                          ignore_seq_with_no_answers=False, num_of_interactions=self.args.total_interactions_num)  # evaluation data should keep all example
 
         dl = DataLoader(dataset, batch_size=1, shuffle=False,
                         num_workers=self.args.num_workers, sampler=None,
