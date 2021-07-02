@@ -13,7 +13,7 @@ predictions.json
 triviaqa/interactive
 predictions
 triviaqa
-
+interactive_longformer/TeacherFeedbackProjectNew
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

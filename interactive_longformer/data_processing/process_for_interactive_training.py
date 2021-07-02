@@ -1,5 +1,5 @@
 """
-Usage: <file_name> --inp_fn=INP_FN --out_fn=OUT_FN --max_num_of_paraphrases=MAX_NUM_OF_PARAGRAPHS --seed=SEED [--cache_dir=CACHE_DIR] --mode=MODE
+Usage: <file_name> --inp_fn=INP_FN --out_fn=OUT_FN --max_num_of_paraphrases=MAX_NUM_OF_PARAGRAPHS --seed=SEED [--cache_dir=CACHE_DIR] --mode=MODE --batch_size=BS
 """
 from docopt import docopt
 from pathlib import Path
@@ -15,9 +15,9 @@ PEGASUS_MODEL_NAME = 'tuner007/pegasus_paraphrase'
 EN_2_DE_MODEL_NAME = "facebook/wmt19-en-de"
 DE_2_EN_MODEL_NAME = "facebook/wmt19-de-en"
 TORCH_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-BATCH_SIZE = 5
+BATCH_SIZE = 20
 
-def get_response(input_text,num_return_sequences,num_beams, model, tokenizer):
+def get_response(input_text,num_return_sequences,num_beams, model, tokenizer, batch_size):
     batch_size = len(input_text)
     batch = tokenizer(input_text,truncation=True,padding='longest',max_length=60, return_tensors="pt").to(TORCH_DEVICE)
     translated = model.generate(**batch,max_length=60,num_beams=num_beams, num_return_sequences=num_return_sequences, temperature=1.5)
@@ -29,12 +29,13 @@ def back_translate(input_text, num_return_sequences, num_beams, model1_name, mod
     model1 = AutoModelForSeq2SeqLM.from_pretrained(model1_name, cache_dir=cache_dir).to(TORCH_DEVICE)
     tokenizer2 = AutoTokenizer.from_pretrained(model2_name, cache_dir=cache_dir)
     model2 = AutoModelForSeq2SeqLM.from_pretrained(model2_name, cache_dir=cache_dir).to(TORCH_DEVICE)
-    import pdb; pdb.set_trace()
-    translated_chunks = list(chunks(get_response(input_text, num_return_sequences, num_beams, model1, tokenizer1), num_return_sequences))
-    back_translated = [[] for i in range(BATCH_SIZE)]
-    for i, translated_chunk in enumerate(translated_chunks):
-        for sentence in translated_chunk:
-            back_translated[i].extend(get_response([sentence], 1, num_beams, model2, tokenizer2))
+    translated_chunks = list(chunks(get_response(input_text, num_return_sequences, num_beams, model1, tokenizer1, batch_size), num_return_sequences))
+    back_translated = [[] for i in range(batch_size)]
+    for i in range(num_return_sequences):
+        translated_i = [translated_chunk[i] for translated_chunk in translated_chunks]
+        responses_i = list(chunks(get_response(translated_i, 1, num_beams, model2, tokenizer2, batch_size), 1))
+        for question, response  in zip(back_translated, responses_i):
+            question.extend(response)
     return back_translated
 
 def chunks(lst, n):
@@ -52,7 +53,7 @@ def partition(lst, n):
 
 
 
-def get_paraphrase_dict(data, mode, num_of_paraphrases, cache_dir):
+def get_paraphrase_dict(data, mode, num_of_paraphrases, cache_dir, batch_size):
     if mode == "duplicate":
         return {sample["paragraphs"][0]["qas"][0]["qid"]:
                 [sample["paragraphs"][0]["qas"][0]["question"]] * num_of_paraphrases
@@ -65,18 +66,21 @@ def get_paraphrase_dict(data, mode, num_of_paraphrases, cache_dir):
             tokenizer = AutoTokenizer.from_pretrained(PEGASUS_MODEL_NAME, cache_dir=cache_dir)
             model = AutoModelForSeq2SeqLM.from_pretrained(PEGASUS_MODEL_NAME, cache_dir=cache_dir).to(TORCH_DEVICE)
             output = {}
-            for batch in tqdm(list(chunks(data, BATCH_SIZE))):
+            for batch in tqdm(list(chunks(data, batch_size))):
                 original_questions = [sample["paragraphs"][0]["qas"][0]["question"] for sample in batch]
-                paraphrases = list(chunks(get_response(original_questions, num_of_paraphrases, num_of_paraphrases, model, tokenizer), num_of_paraphrases))
+                paraphrases = list(chunks(get_response(original_questions, num_of_paraphrases, num_of_paraphrases, model, tokenizer, batch_size), num_of_paraphrases))
                 for sample, paras in zip(batch, paraphrases):
                     output[sample["paragraphs"][0]["qas"][0]["qid"]] = paras
             return output
 
         elif mode == "back-translate":
             output = {}
-            for batch in tqdm(list(chunks(data, BATCH_SIZE))):
+            for batch in tqdm(list(chunks(data, batch_size))):
                 original_questions = [sample["paragraphs"][0]["qas"][0]["question"] for sample in batch]
                 paraphrases = back_translate(original_questions, num_of_paraphrases, num_of_paraphrases, EN_2_DE_MODEL_NAME, DE_2_EN_MODEL_NAME, cache_dir)
+                for sample, paras in zip(batch, paraphrases):
+                    output[sample["paragraphs"][0]["qas"][0]["qid"]] = paras
+
             return output
 
 
@@ -87,6 +91,7 @@ if __name__ == "__main__":
     mode = args["--mode"]
     max_num_of_paraphrases = int(args["--max_num_of_paraphrases"])
     cache_dir = args["--cache_dir"] if args["--cache_dir"] else CACHE_DIR
+    batch_size = int(args["--batch_size"]) if args["--batch_size"] else BATCH_SIZE
 
     seed = int(args["--seed"])
 
@@ -95,13 +100,13 @@ if __name__ == "__main__":
     with open(inp_fn) as f:
         data = json.load(f)["data"]
 
-    out_data = data.copy()[:10]
+    out_data = data.copy()
     random.shuffle(out_data)
     sliced_out_data = partition(out_data, max_num_of_paraphrases+1)
     current_num_of_paraphrases = 0
     for item in sliced_out_data:
-        paraphrase_dict = get_paraphrase_dict(item, mode, current_num_of_paraphrases, cache_dir)
-        for sample in tqdm(item):
+        paraphrase_dict = get_paraphrase_dict(item, mode, current_num_of_paraphrases, cache_dir, batch_size)
+        for sample in item:
             qid = sample["paragraphs"][0]["qas"][0]["qid"]
             sample["paragraphs"][0]["qas"][0]["question_paraphrases"] = paraphrase_dict[qid]
         current_num_of_paraphrases += 1
@@ -110,5 +115,5 @@ if __name__ == "__main__":
 
     with open(out_fn, "w+") as f:
         json.dump({"data": out_data,
-                   "version": "duplicates"
+                   "version": mode
         },f)
