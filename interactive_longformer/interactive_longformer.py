@@ -30,6 +30,10 @@ import hiddenlayer as hl
 from scripts.triviaqa import TriviaQADataset, TriviaQA
 import wandb
 
+def pad_list(lst):
+    max_length = max(len(row) for row in lst)
+    return np.array([row + [0] * (max_length - len(row)) for row in lst])
+
 class ModifiedTriviaQADataset(TriviaQADataset):
     def __init__(self, file_path, tokenizer, max_seq_len, max_doc_len, doc_stride,
                  max_num_answers, ignore_seq_with_no_answers, max_question_len,
@@ -207,8 +211,9 @@ class ModifiedTriviaQADataset(TriviaQADataset):
                     padding_len = max_answer_len - len(answer_tokens)
                     answer_tokens.extend([self.tokenizer.pad_token_id] * padding_len)
 
-        return (torch.tensor(input_ids_list).unsqueeze(0), torch.tensor(input_mask_list).unsqueeze(0),
-                             torch.tensor(segment_ids_list).unsqueeze(0),
+        return (torch.tensor(pad_list(input_ids_list)).unsqueeze(0),
+                torch.tensor(pad_list(input_mask_list)).unsqueeze(0),
+                             torch.tensor(pad_list(segment_ids_list)).unsqueeze(0),
                 # NOTE: the labels provided are for the original question only.
                              torch.tensor(start_positions_list), torch.tensor(end_positions_list),
                              torch.tensor(answer_token_ids_list),
@@ -485,6 +490,7 @@ def main(args):
     wandb_logger = WandbLogger(name=args.run_name, project=args.project_name)
 
     print(args)
+    print("SEED {}".format(args.seed))
     train_set_size = 110648  # hardcode dataset size. Needed to compute number of steps for the lr scheduler
     args.steps = args.epochs * train_set_size / (args.batch_size * max(args.gpus, 1))
     print(f'>>>>>>> #steps: {args.steps}, #epochs: {args.epochs}, batch_size: {args.batch_size * args.gpus} <<<<<<<')
